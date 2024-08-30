@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",  // Output directory for compiled files
+    "module": "commonjs",  // Electron uses commonjs modules
+    "target": "es6",  // Electron can use ES6 syntax
+    "rootDir": ".",  // Root directory for TypeScript files
+    "noEmit": false,  // Allow emitting files for Electron
+    "moduleResolution": "node"  // Compatible with commonjs and node
+  },
+  "include": [
+    "main.ts"  // Include Electron main process file
+  ]
+}
