@@ -17,7 +17,7 @@ def get_charset(charset_choice):
     else:  # any
         return string.printable
 
-@cuda.jit
+@cuda.jit 
 def generate_passwords_kernel(charset, length, start_idx, passwords):
     idx = cuda.grid(1)
     if idx < passwords.shape[0]:
