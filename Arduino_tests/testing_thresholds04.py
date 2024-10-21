@@ -1,9 +1,7 @@
 import serial
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-import numpy as np
 import threading
-import time
 
 # ---------------------- Variable Zone ---------------------- #
 # Configuration
@@ -25,25 +23,23 @@ GYRO_THRESHOLD = 0.3  # You can adjust this value dynamically
 # Lists to store data
 time_data = []
 gyro_y_data = []
-step_count_data = []
-step_markers = []  # To store indices of steps
 
 # Step counting variables
 step_count = 0
 last_step_time = 0  # Time of the last detected step
-consecutive_steps = 0
-required_consecutive_steps = 5  # Number of consecutive peaks required to confirm a step
+last_crossing_point = None  # Store last crossing point to avoid double counting
+crossed_upward = False  # To check if the last crossing was upward
 
 # Initialize serial connection
 ser = serial.Serial(SERIAL_PORT, BAUD_RATE)
 
 # Function to read serial data
 def read_serial_data():
-    global step_count, last_step_time, consecutive_steps
+    global step_count, last_step_time, last_crossing_point, crossed_upward
+
     while True:
         line = ser.readline().decode('utf-8', errors='ignore').strip()  # Read and decode the serial line
         if line:
-            # Attempt to parse the gyroscope data
             try:
                 data = line.split(',')
                 
@@ -59,21 +55,28 @@ def read_serial_data():
                 time_data.append(current_time)  # Incremental time
                 gyro_y_data.append(gyro_y)  # Append gyroscope data
 
-                # Step detection logic
-                if gyro_y > STEP_THRESHOLD and gyro_y > PEAK_HEIGHT_THRESHOLD:
+                # Step detection logic based on threshold crossings
+                if gyro_y > GYRO_THRESHOLD and (last_crossing_point is None or not crossed_upward):
+                    # A crossing point occurs when gyro_y crosses above the threshold
+                    crossed_upward = True
+                    last_crossing_point = current_time  # Update the crossing point
+
+                elif gyro_y < GYRO_THRESHOLD and (last_crossing_point is not None and crossed_upward):
+                    # A crossing point occurs when gyro_y crosses below the threshold
+                    crossed_upward = False
+
+                    # Check if enough time has passed since the last detected step
                     if (current_time - last_step_time) * 1000 > MIN_TIME_BETWEEN_STEPS:  # Convert to milliseconds
-                        consecutive_steps += 1  # Count this as a step
-                        
-                        # Check if we have enough consecutive steps to confirm
-                        if consecutive_steps >= required_consecutive_steps:
+                        # Only count as a step if we are not stationary
+                        if abs(gyro_y) > PEAK_HEIGHT_THRESHOLD:
                             step_count += 1
                             print(f"Steps detected: {step_count}")  # Print step count in terminal
-                            consecutive_steps = 0  # Reset counter after counting the step
-                        
-                        last_step_time = current_time  # Update the last step time
-                    else:
-                        # If detected too quickly, ignore this peak
-                        consecutive_steps = 0  # Reset consecutive step count if time is too short
+                            last_step_time = current_time  # Update the last step time
+
+                # Reset crossing point when gyro_y is within a threshold for stationary detection
+                if abs(gyro_y) < STATIONARY_THRESHOLD:
+                    last_crossing_point = None
+
             except (ValueError, IndexError) as e:
                 print(f"Error processing line: {line}, skipping... {e}")
 
@@ -113,10 +116,6 @@ def update_plot(frame):
 
         # Update step count text
         step_count_text.set_text(f'Steps: {step_count}')  # Update step count text
-
-        # Plot step markers (optional, can remove if not needed)
-        for marker in step_markers:
-            plt.scatter(marker, gyro_y_data[marker], color='green', marker='o')  # Green marker for step count
 
     return line1, threshold_line, step_count_text
 
