@@ -11,17 +11,14 @@ SERIAL_PORT = 'COM3'  # Adjust to your COM port
 BAUD_RATE = 115200
 
 # Parameters for step detection
-STEP_THRESHOLD = 0.4  # Initial threshold for peak detection
-PEAK_HEIGHT_THRESHOLD = 0.4  # Minimum height for a peak
-MIN_TIME_BETWEEN_STEPS = 300  # Minimum time to wait after a step is counted in milliseconds
-MAX_SPIKES_WINDOW = 400  # Max time window to consider multiple spikes in milliseconds
+MIN_TIME_BETWEEN_STEPS = 500  # Minimum time to wait after a step is counted in milliseconds
+MAX_SPIKES_WINDOW = 500  # Max time window to consider multiple spikes in milliseconds
+MOVEMENT_FREQUENCY_THRESHOLD = 1.2  # Threshold to distinguish walking frequency
+MOVEMENT_THRESHOLD = 1.5  # Threshold for detecting significant movement
+MOVEMENT_DURATION = 300  # Minimum duration for a movement to be considered a step
 
 # Parameters for stationary detection
 STATIONARY_THRESHOLD = 0.05  # Threshold for detecting stationary position
-
-# Threshold for plot visualization
-THRESHOLD_GAP = 3  # Gap between SMA and upper threshold
-LOWER_THRESHOLD_GAP = 2  # Gap between SMA and lower threshold
 
 # ----------------------------------------------------------- #
 
@@ -34,7 +31,6 @@ sma_data = []  # Store the smoothed moving average data
 step_count = 0
 last_step_time = 0  # Time of the last detected step
 crossed_upper_threshold = False  # To check if we have crossed the upper threshold
-spike_count = 0  # Count of valid spikes
 last_spike_time = 0  # Time of the last valid spike
 step_detection_paused_until = 0  # Time until which step detection is paused
 
@@ -43,7 +39,7 @@ ser = serial.Serial(SERIAL_PORT, BAUD_RATE)
 
 # Function to read serial data
 def read_serial_data():
-    global step_count, last_step_time, crossed_upper_threshold, spike_count
+    global step_count, last_step_time, crossed_upper_threshold
     global last_spike_time, step_detection_paused_until
 
     while True:
@@ -54,7 +50,6 @@ def read_serial_data():
 
                 # Ensure we have enough data points in the split line
                 if len(data) < 4:  # Expecting at least 3 gyro readings
-                    print(f"Skipping malformed line: {line}")
                     continue
 
                 # Assuming GyroX, GyroY, and GyroZ data are in the correct indices
@@ -76,33 +71,30 @@ def read_serial_data():
                 else:
                     sma_data.append(gyro_magnitude)  # If less than 20 readings, just append current gyro_magnitude
 
-                # Step detection logic based on fixed upper and lower thresholds
+                # Check for step detection logic
                 if len(sma_data) > 0:
-                    upper_threshold = sma_data[-1] + THRESHOLD_GAP  # Set upper threshold based on SMA
-                    lower_threshold = sma_data[-1] - LOWER_THRESHOLD_GAP  # Set lower threshold based on SMA
+                    upper_threshold = sma_data[-1] + MOVEMENT_THRESHOLD  # Set upper threshold based on SMA
+                    lower_threshold = sma_data[-1] - MOVEMENT_THRESHOLD  # Set lower threshold based on SMA
 
                     # Check if step detection is paused
                     if current_time < step_detection_paused_until:
                         continue  # Ignore spikes if the step detection is paused
 
-                    # Only consider spike crossings
+                    # Detect peaks based on gyro magnitude
                     if gyro_magnitude > upper_threshold and not crossed_upper_threshold:
                         crossed_upper_threshold = True  # Mark upper threshold as crossed
-                        spike_count += 1  # Increment spike count
                         last_spike_time = current_time  # Update last spike time
 
                     elif gyro_magnitude < lower_threshold and crossed_upper_threshold:
                         # Step counting logic
                         time_since_last_spike = current_time - last_spike_time
                         
-                        # Check if the time since last spike is within the max spikes window
-                        if time_since_last_spike < MAX_SPIKES_WINDOW and spike_count >= 2:
-                            # Valid step detected
+                        # Check if time since last spike is within max spikes window
+                        if time_since_last_spike < MAX_SPIKES_WINDOW:
                             step_count += 1
-                            print(f"Steps detected: {step_count}")  # Print step count in terminal
+                            print(f"Step detected! Total steps: {step_count}")  # Print step count in terminal
                             last_step_time = current_time  # Update the last step time
                             step_detection_paused_until = current_time + MIN_TIME_BETWEEN_STEPS  # Set pause until defined time
-                            spike_count = 0  # Reset spike count after a step is counted
 
                         # Reset crossed state
                         crossed_upper_threshold = False  # Reset the upper crossing flag after checking
@@ -110,6 +102,15 @@ def read_serial_data():
                     # Reset crossing points when gyro_magnitude is within a threshold for stationary detection
                     if abs(gyro_magnitude) < STATIONARY_THRESHOLD:
                         crossed_upper_threshold = False
+
+                # Implement frequency analysis and movement pattern recognition
+                if len(gyro_magnitude_data) > 20:
+                    recent_data = gyro_magnitude_data[-20:]  # Get the most recent gyro magnitude data
+                    movement_frequency = np.mean(recent_data)  # Average for basic frequency detection
+
+                    if movement_frequency < MOVEMENT_FREQUENCY_THRESHOLD:
+                        print("Ignoring non-walking movement.")
+                        step_count -= 1  # Optional: Decrease count if the movement is too low
 
             except (ValueError, IndexError) as e:
                 print(f"Error processing line: {line}, skipping... {e}")
@@ -140,25 +141,18 @@ def update_plot(frame):
     # Update the plot with the latest data
     if len(time_data) > 0:
         # Update line for gyroscope magnitude data
-        line1.set_data(time_data, gyro_magnitude_data)
+        line1.set_data(range(len(time_data)), gyro_magnitude_data)
 
         # Update line for smoothed moving average
         if len(sma_data) > 0:
-            sma_x_data = time_data[-len(sma_data):]  # Corresponding time data for SMA
-            sma_line.set_data(sma_x_data, sma_data)  # Update SMA line
-        else:
-            sma_line.set_data([], [])  # Clear SMA line if no data
+            sma_line.set_data(range(len(sma_data)), sma_data)  # Update SMA line
 
         # Update the threshold lines based on the latest SMA
         if len(sma_data) > 0:
-            upper_threshold = sma_data[-1] + THRESHOLD_GAP
-            lower_threshold = sma_data[-1] - LOWER_THRESHOLD_GAP
-            upper_threshold_line.set_data(time_data, [upper_threshold] * len(time_data))  # Set upper threshold line
-            lower_threshold_line.set_data(time_data, [lower_threshold] * len(time_data))  # Set lower threshold line
-        else:
-            # If no SMA data, set default thresholds
-            upper_threshold_line.set_data(time_data, [STEP_THRESHOLD] * len(time_data))
-            lower_threshold_line.set_data(time_data, [0] * len(time_data))
+            upper_threshold = sma_data[-1] + MOVEMENT_THRESHOLD
+            lower_threshold = sma_data[-1] - MOVEMENT_THRESHOLD
+            upper_threshold_line.set_data(range(len(time_data)), [upper_threshold] * len(time_data))  # Set upper threshold line
+            lower_threshold_line.set_data(range(len(time_data)), [lower_threshold] * len(time_data))  # Set lower threshold line
 
         # Adjust x-axis limits if necessary
         ax.set_xlim(max(0, len(time_data) - 100), len(time_data))
@@ -175,5 +169,5 @@ def update_plot(frame):
 
 # Start threads for data reading and animation
 threading.Thread(target=read_serial_data, daemon=True).start()
-ani = animation.FuncAnimation(fig, update_plot, init_func=init, blit=False)  # Disable blitting
+ani = animation.FuncAnimation(fig, update_plot, init_func=init, interval=100)
 plt.show()
