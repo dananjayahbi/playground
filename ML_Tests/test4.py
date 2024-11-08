@@ -31,3 +31,4 @@ plt.title(f"Predicted Label: {predicted_label}")
 plt.show()
 
 print(f"The model predicts this image is a: {predicted_label}")
+ 
